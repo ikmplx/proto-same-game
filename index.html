@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2D-прототип</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>2D-прототип</h1>
+      <p>Нажмите на группу из трёх или более соседних клеток одного цвета, чтобы убрать её.</p>
+    </header>
+    <div class="toolbar">
+      <span id="score" aria-live="polite">Убрано клеток: 0</span>
+      <button id="reset" type="button">Начать заново</button>
+    </div>
+    <p id="error" role="alert" hidden></p>
+    <div id="game" aria-label="Игровое поле"></div>
+    <noscript>Для запуска игры включите JavaScript в браузере.</noscript>
+  </main>
+  <script>
+    window.showGameError = function () {
+      const error = document.getElementById('error');
+      error.hidden = false;
+      error.textContent = 'Не удалось запустить игру или произошла ошибка. Попробуйте обновить страницу. Если ошибка повторится, попросите Codex проверить проект.';
+    };
+    window.addEventListener('error', window.showGameError);
+    window.addEventListener('unhandledrejection', window.showGameError);
+  </script>
+  <script src="lib/phaser.min.js" onerror="showGameError()"></script>
+  <script src="game.js" onerror="showGameError()"></script>
+</body>
+</html>
