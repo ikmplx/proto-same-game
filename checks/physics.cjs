@@ -1,6 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
-const { FlightModel, RULES, hitsSegment } = require('../flight-model.js');
+const { FlightModel, RULES, hitsSegment, normalizeParameters } = require('../flight-model.js');
+assert.equal(RULES.lift, 550 * 1.2);
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-7, `${a} != ${b}`);
 const ballistic = new FlightModel(40);
 ballistic.launch();
@@ -31,10 +32,12 @@ assert.equal(ballistic.phase, 'landed'); assert.equal(ballistic.y, RULES.ground)
 const stopped = ballistic.x; ballistic.advance(1, true); assert.equal(ballistic.x, stopped);
 ballistic.reset(75);
 assert.equal(ballistic.phase, 'ready'); assert.equal(ballistic.coins, 0); assert.equal(ballistic.fuel, 100); assert.equal(ballistic.distance, 0);
-const low = new FlightModel(15), high = new FlightModel(75); low.launch(); high.launch();
+assert.equal(ballistic.angle, 50);
+assert.equal(new FlightModel(5).angle, 15);
+const low = new FlightModel(15), high = new FlightModel(50); low.launch(); high.launch();
 assert.equal(low.vx, high.vx); assert.ok(low.vy > high.vy);
 // Все углы дают один горизонтальный темп; вертикальная скорость сохраняет выбранное направление.
-for (let angle = 15; angle <= 75; angle++) {
+for (let angle = 15; angle <= 50; angle++) {
   for (const lift of [false, true]) {
     const model = new FlightModel(angle);
     model.launch();
@@ -49,4 +52,15 @@ for (let angle = 15; angle <= 75; angle++) {
 assert.equal(hitsSegment(50, 10, 0, 0, 100, 0, 11), true);
 assert.equal(hitsSegment(50, 12, 0, 0, 100, 0, 11), false);
 assert.equal(hitsSegment(0, 0, 0, 0, 0, 0, 1), true);
+assert.deepEqual(normalizeParameters({angle:999,canisterFrequency:-1,canisterVolume:NaN,liftPercent:Infinity}),
+  {angle:50,canisterFrequency:0,canisterVolume:30,liftPercent:100});
+assert.deepEqual(normalizeParameters(null),normalizeParameters());
+const configurable = new FlightModel(40,{canisterVolume:55,liftPercent:150});
+configurable.launch(); const startVy = configurable.vy;
+configurable.advance(.5,true);
+near(configurable.vy,startVy+(RULES.gravity-RULES.lift*1.5)*.5);
+configurable.fuel=10; configurable.addFuel(); assert.equal(configurable.fuel,65);
+configurable.setParameters({liftPercent:0});
+const idleFuel=configurable.fuel; configurable.advance(.1,true);
+assert.equal(configurable.fuel,idleFuel); assert.equal(configurable.lifting,false);
 console.log('PASS: ballistic trajectory, lift, fuel, empty tank, refill, landing, reset, angles, swept collection');

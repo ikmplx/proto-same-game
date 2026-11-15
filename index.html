@@ -7,37 +7,31 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main>
-    <header class="page-header">
-      <div><p class="eyebrow">ЛЁТНАЯ ПЛОЩАДКА / 01</p><h1>Попутный ветер<span>↗</span></h1></div>
-      <div class="header-note"><span class="live-dot"></span>Прототип механики<span class="version">ЗАПУСК · ПОЛЁТ · СБОР</span></div>
-    </header>
-    <section class="flight-card" aria-label="Игра «Попутный ветер»">
-      <div class="dashboard">
-        <div class="stat"><span class="stat-label">ПРОЙДЕНО</span><strong><span id="distance">0</span><small> м</small></strong></div>
-        <div class="stat coins-stat"><span class="stat-label">МОНЕТЫ</span><strong><span class="coin-symbol">✦</span> <span id="coins">0</span></strong></div>
-        <div class="stat fuel-stat"><div class="fuel-caption"><span class="stat-label">ТОПЛИВО</span><span id="fuel-value">100%</span></div><div class="fuel-track" role="progressbar" aria-label="Топливо" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><div id="fuel-fill"></div></div><span id="fuel-note">Расходуется только при подъёме</span></div>
-        <button id="reset" class="reset-button" type="button" title="Начать заново (R)">↻ <span>Заново</span></button>
-      </div>
-      <p id="error" role="alert" hidden></p>
-      <div class="arena">
-        <div id="game" aria-label="Игровое поле. Нажмите для запуска, затем удерживайте для подъёма."></div>
-        <div class="scene-label"><span id="phase-dot"></span><span id="phase-label">ГОТОВ К ВЗЛЁТУ</span></div>
-        <div id="intro" class="intro"><p class="eyebrow">ПОЙМАЙ СВОЙ ПОТОК</p><h2>Как далеко<br>ты улетишь?</h2><p>Выбери угол и отправляйся в полёт.<br>Береги топливо — впереди ещё много неба.</p><span class="tap-hint">Нажми на небо или кнопку «Запуск» ↗</span></div>
-        <div id="flight-tip" class="flight-tip" hidden>Удерживай, чтобы набирать высоту</div>
-        <div id="result" class="result" hidden>
-          <p class="eyebrow">ПОПЫТКА ЗАВЕРШЕНА</p><h2>Мягкой посадки!</h2><p id="result-message"></p>
-          <div class="result-stats"><div><strong id="result-distance">0</strong><span>метров</span></div><div><strong id="result-coins">0</strong><span>монет</span></div></div>
-          <button id="again" type="button" class="primary">Ещё один полёт ↗</button>
-        </div>
-      </div>
-      <div class="controls">
-        <div id="angle-control" class="angle-control"><label for="angle">УГОЛ ЗАПУСКА <strong id="angle-value">40°</strong></label><div class="angle-row"><span>15°</span><input id="angle" type="range" min="15" max="75" value="40" aria-label="Угол запуска"><span>75°</span></div></div>
-        <div class="control-help" id="control-help"><strong>Сначала — хороший разгон</strong><span>Измени угол ползунком или клавишами ← →</span></div>
-        <button id="action" type="button" class="primary action-button">Запуск <span>↗</span></button>
-      </div>
-    </section>
-    <footer><span><b>Клик / тап / пробел</b> — запуск, затем удержание для подъёма</span><span><i class="legend-coin"></i>монета <i class="legend-fuel"></i>+30% топлива <b class="key">R</b> новая попытка</span></footer>
+  <main class="arena" aria-label="Игра «Попутный ветер»">
+    <div id="game" aria-label="Игровое поле. Нажмите для запуска, затем удерживайте для подъёма."></div>
+    <div class="dashboard">
+      <div class="stat"><span class="stat-label">ПРОЙДЕНО</span><strong><span id="distance">0</span><small> м</small></strong></div>
+      <div class="stat coins-stat"><span class="stat-label">МОНЕТЫ</span><strong><span class="coin-symbol">✦</span> <span id="coins">0</span></strong></div>
+      <div class="stat fuel-stat"><div class="fuel-caption"><span class="stat-label">ТОПЛИВО</span><span id="fuel-value">100%</span></div><div class="fuel-track" role="progressbar" aria-label="Топливо" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><div id="fuel-fill"></div></div><span id="fuel-note">Расходуется только при подъёме</span></div>
+      <button id="reset" class="quiet-button" type="button" title="Начать заново (R)">↻ <span>Новый полёт</span></button>
+    </div>
+    <div class="scene-label"><span id="phase-dot"></span><span id="phase-label">ГОТОВ К ВЗЛЁТУ</span></div>
+    <div id="intro" class="intro"><p class="eyebrow">ПОПУТНЫЙ ВЕТЕР</p><h1>Как далеко<br>ты улетишь?</h1><p>Выбери угол и отправляйся в полёт.<br>Удерживай экран или пробел для подъёма.</p></div>
+    <div id="result" class="result" hidden>
+      <p class="eyebrow">ПОПЫТКА ЗАВЕРШЕНА</p><h2>Мягкой посадки!</h2><p id="result-message"></p>
+      <div class="result-stats"><div><strong id="result-distance">0</strong><span>метров</span></div><div><strong id="result-coins">0</strong><span>монет</span></div></div>
+      <button id="again" type="button" class="primary">Ещё один полёт ↗</button>
+    </div>
+    <div class="controls" aria-label="Параметры полёта">
+      <div id="angle-control" class="parameter"><label for="angle">Угол запуска <strong id="angle-value">40°</strong></label><input id="angle" type="range" min="15" max="50" value="40" aria-label="Угол запуска"><div class="range-labels"><span>15°</span><span>50°</span></div></div>
+      <div class="parameter"><label for="canister-frequency">Частота канистр <strong id="canister-frequency-value">2 / 100 м</strong></label><input id="canister-frequency" type="range" min="0" max="6" step="0.5" value="2" aria-label="Частота канистр"><div class="range-labels"><span>нет</span><span>6 / 100 м</span></div></div>
+      <div class="parameter"><label for="canister-volume">Объём канистры <strong id="canister-volume-value">30%</strong></label><input id="canister-volume" type="range" min="5" max="100" step="5" value="30" aria-label="Объём канистры"><div class="range-labels"><span>5%</span><span>100%</span></div></div>
+      <div class="parameter"><label for="lift-power">Подъёмная сила <strong id="lift-power-value">100%</strong></label><input id="lift-power" type="range" min="0" max="200" step="10" value="100" aria-label="Подъёмная сила"><div class="range-labels"><span>0%</span><span>200%</span></div></div>
+      <button id="reset-parameters" class="quiet-button" type="button" title="Вернуть исходные параметры: 40°, 2 канистры / 100 м, 30% бака, 100% подъёмной силы">↺ Сброс параметров</button>
+      <button id="action" type="button" class="primary action-button">Запуск <span>↗</span></button>
+      <p id="settings-note" role="status">Параметры сохраняются в браузере</p>
+    </div>
+    <p id="error" role="alert" hidden></p>
     <noscript>Для запуска игры включите JavaScript в браузере.</noscript>
   </main>
   <script>

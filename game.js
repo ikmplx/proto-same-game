@@ -3,9 +3,38 @@
   'use strict';
   if (typeof Phaser === 'undefined') { window.showGameError(); return; }
   const ui = Object.fromEntries(['distance', 'coins', 'fuel-value', 'fuel-fill', 'fuel-note',
-    'phase-label', 'phase-dot', 'intro', 'flight-tip', 'result', 'result-distance', 'result-coins',
-    'result-message', 'angle', 'angle-value', 'angle-control', 'control-help', 'action']
+    'phase-label', 'phase-dot', 'intro', 'result', 'result-distance', 'result-coins',
+    'result-message', 'angle', 'angle-value', 'angle-control', 'action', 'canister-frequency',
+    'canister-frequency-value', 'canister-volume', 'canister-volume-value', 'lift-power', 'lift-power-value', 'settings-note']
     .map(id => [id, document.getElementById(id)]));
+  const parameterCookie = 'airplane-parameters-v1';
+  function loadParameters() {
+    try {
+      const saved = document.cookie.split('; ').find(value => value.startsWith(`${parameterCookie}=`));
+      return normalizeFlightParameters(saved ? JSON.parse(decodeURIComponent(saved.slice(parameterCookie.length + 1))) : {});
+    } catch { return normalizeFlightParameters(); }
+  }
+  // Cookie хранится в браузере и действует для всех портов локального сервера.
+  let parameters = loadParameters();
+  function saveParameters() {
+    try {
+      const encoded = encodeURIComponent(JSON.stringify(parameters));
+      document.cookie = `${parameterCookie}=${encoded}; Path=/; Max-Age=31536000; SameSite=Strict`;
+      const saved = document.cookie.split('; ').find(value => value.startsWith(`${parameterCookie}=`));
+      ui['settings-note'].textContent = saved?.slice(parameterCookie.length + 1) === encoded ? 'Параметры сохранены в браузере' : 'Браузер запретил сохранение параметров';
+    } catch { ui['settings-note'].textContent = 'Браузер запретил сохранение параметров'; }
+  }
+  function syncParameters() {
+    ui.angle.value = parameters.angle;
+    ui['angle-value'].textContent = `${parameters.angle}°`;
+    ui['canister-frequency'].value = parameters.canisterFrequency;
+    ui['canister-frequency-value'].textContent = parameters.canisterFrequency ? `${parameters.canisterFrequency} / 100 м` : 'Нет';
+    ui['canister-volume'].value = parameters.canisterVolume;
+    ui['canister-volume-value'].textContent = `${parameters.canisterVolume}%`;
+    ui['lift-power'].value = parameters.liftPercent;
+    ui['lift-power-value'].textContent = `${parameters.liftPercent}%`;
+  }
+  syncParameters();
   const heldPointers = new Set();
   let spaceHeld = false;
   let scene;
@@ -46,12 +75,29 @@
     if (event.code === 'KeyR' && !event.repeat) scene?.resetRun();
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.code) && !formTarget && scene?.model.phase === 'ready') {
       event.preventDefault();
-      ui.angle.value = Math.max(15, Math.min(75, Number(ui.angle.value) + (['ArrowRight', 'ArrowUp'].includes(event.code) ? 1 : -1)));
+      ui.angle.value = Math.max(FlightRules.minAngle, Math.min(FlightRules.maxAngle, Number(ui.angle.value) + (['ArrowRight', 'ArrowUp'].includes(event.code) ? 1 : -1)));
       scene.adjustAngle();
     }
   });
   window.addEventListener('keyup', event => { if (event.code === 'Space') spaceHeld = false; });
   ui.angle.addEventListener('input', () => scene?.adjustAngle());
+  for (const [id, key] of [['canister-frequency', 'canisterFrequency'], ['canister-volume', 'canisterVolume'], ['lift-power', 'liftPercent']]) {
+    ui[id].addEventListener('input', () => {
+      parameters = normalizeFlightParameters({ ...parameters, [key]: Number(ui[id].value) });
+      syncParameters(); saveParameters();
+      scene?.model.setParameters(parameters);
+      if (key === 'canisterFrequency') scene?.resetCanisters();
+    });
+  }
+  document.getElementById('reset-parameters').addEventListener('click', () => {
+    parameters = normalizeFlightParameters();
+    syncParameters(); saveParameters();
+    if (scene) {
+      scene.model.setParameters(parameters);
+      if (scene.model.phase === 'ready') scene.adjustAngle();
+      scene.resetCanisters();
+    }
+  });
   document.getElementById('reset').addEventListener('click', () => scene?.resetRun());
   document.getElementById('again').addEventListener('click', () => scene?.resetRun());
 
@@ -66,7 +112,7 @@
     create() {
       scene = this;
       this.cameras.main.setBackgroundColor('#dcebe6');
-      this.add.circle(1000, 113, 53, 0xfaf0c9, .65).setScrollFactor(0).setDepth(-20);
+      this.sun = this.add.circle(1000, 113, 53, 0xfaf0c9, .65).setScrollFactor(0).setDepth(-20);
       this.clouds = [];
       for (let i = 0; i < 8; i++) {
         const cloud = this.add.image(120 + i * 210, 70 + (i * 79 % 190), 'cloud')
@@ -74,6 +120,7 @@
         cloud.baseX = cloud.x; cloud.baseY = cloud.y; this.clouds.push(cloud);
       }
       this.hills = [0, 1, 2].map(i => this.add.image(i * 1200, 180, 'hills').setOrigin(0).setScrollFactor(0).setDepth(-15));
+      this.earth = this.add.rectangle(0, 600, 1200, 800, 0xd0c49a).setOrigin(0).setScrollFactor(0).setDepth(2);
       this.ground = this.add.tileSprite(0, 486, 1200, 130, 'ground').setOrigin(0).setScrollFactor(0).setDepth(3);
       this.decorations = this.add.group();
       this.pickups = this.add.group();
@@ -87,11 +134,33 @@
       this.propeller = this.add.ellipse(0, 0, 4, 33, 0xe8eadd, .65).setDepth(11);
       this.trail = this.add.graphics().setDepth(7);
       this.resetRun();
+      this.scale.on('resize', this.resizeView, this);
+      this.layoutObserver = new ResizeObserver(() => this.resizeView());
+      this.layoutObserver.observe(document.querySelector('.controls'));
+      this.layoutObserver.observe(document.querySelector('.dashboard'));
+      this.resizeView();
+    }
+    resizeView() {
+      const controlsHeight = document.querySelector('.controls').getBoundingClientRect().height;
+      const hudHeight = document.querySelector('.dashboard').getBoundingClientRect().height;
+      document.querySelector('.arena').style.setProperty('--play-center', `${(hudHeight + this.scale.height - controlsHeight) / 2}px`);
+      this.cameras.main.setOrigin(0, 0).setZoom(Math.max(.25, (this.scale.height - controlsHeight + 12) / 580));
+      this.viewWidth = this.scale.width / this.cameras.main.zoom;
+      this.followY = Math.max(200, (hudHeight + 45) / this.cameras.main.zoom);
+      while (this.hills.length < Math.ceil(this.viewWidth / 1200) + 1) {
+        this.hills.push(this.add.image(0, 180, 'hills').setOrigin(0).setScrollFactor(0).setDepth(-15));
+      }
+      this.ground.width = this.viewWidth + 1;
+      this.earth.width = this.viewWidth + 1;
+      this.sun.x = this.viewWidth * .83;
+      if (this.model) { this.populate(this.model.x + this.viewWidth + 1000); this.syncView(); }
     }
     resetRun() {
       clearInput();
-      this.model = new FlightModel(Number(ui.angle.value));
-      this.accumulator = 0; this.trailPoints = []; this.trailClock = 0; this.nextSegment = 0;
+      this.model = new FlightModel(Number(ui.angle.value), parameters);
+      this.accumulator = 0; this.trailPoints = []; this.trailClock = 0; this.nextSegment = 0; this.nextMarker = 50;
+      this.canisterIndex = 0;
+      this.nextCanisterX = this.model.startX + this.canisterSpacing;
       this.pickups.clear(true, true); this.decorations.clear(true, true); this.effects.clear(true, true);
       this.cameras.main.setScroll(0, 0);
       this.plane.setAlpha(1); this.propeller.setVisible(false); this.planeShadow.setVisible(true);
@@ -99,49 +168,79 @@
         this.decorations.add(this.add.image(x, y, 'tree').setOrigin(.5, 1).setScale(scale).setDepth(2));
       }
       this.addSign(85, 'СТАРТ');
-      this.populate(2200);
-      ui.intro.hidden = false; ui.result.hidden = true; ui['flight-tip'].hidden = true;
+      this.populate(this.model.x + Math.max(2000, (this.viewWidth || 1200) + 1000));
+      ui.intro.hidden = false; ui.result.hidden = true;
       ui.angle.disabled = false; ui['angle-control'].classList.remove('disabled');
       ui.action.disabled = false; ui.action.innerHTML = 'Запуск <span>↗</span>';
-      ui['control-help'].innerHTML = '<strong>Сначала — хороший разгон</strong><span>Измени угол ползунком или клавишами ← →</span>';
       this.syncView(); this.updateHud();
     }
     adjustAngle() {
       if (this.model.phase !== 'ready') return;
       this.model.reset(Number(ui.angle.value));
+      parameters.angle = this.model.angle;
+      saveParameters();
+      for (const obj of this.decorations.getChildren()) {
+        if (obj.markerDistance != null) obj.x = this.model.startX + obj.markerDistance * FlightRules.pixelsPerMeter;
+      }
+      this.resetCanisters();
       ui['angle-value'].textContent = `${this.model.angle}°`;
       this.syncView();
     }
     launch() {
       if (this.model.phase !== 'ready') return;
       this.model.launch();
-      ui.intro.hidden = true; ui['flight-tip'].hidden = false;
+      ui.intro.hidden = true;
       ui.angle.disabled = true; ui['angle-control'].classList.add('disabled');
       ui.action.innerHTML = 'Удерживай: подъём <span>↑</span>';
-      ui['control-help'].innerHTML = '<strong>Отпускай, чтобы планировать</strong><span>Без нажатия топливо сохраняется. Канистра даёт +30%.</span>';
       this.aim.clear();
     }
-    addSign(x, text) {
+    addSign(x, text, markerDistance = null) {
       const post = this.add.rectangle(x, 516, 4, 32, 0x947a56).setDepth(4);
       const board = this.add.rectangle(x, 497, 65, 23, 0xe9dfb7).setStrokeStyle(1, 0xa4966d).setDepth(4);
       const label = this.add.text(x, 497, text, { fontFamily: 'Arial', fontSize: '9px', color: '#6f795d', fontStyle: 'bold' }).setOrigin(.5).setDepth(5);
       this.decorations.addMultiple([post, board, label]);
+      for (const obj of [post, board, label]) obj.markerDistance = markerDistance;
+    }
+    addCoinPattern(x, y, index) {
+      // Формы чередуются предсказуемо, чтобы попытки можно было сравнивать.
+      const patterns = [
+        [[0, 0], [46, -38], [92, -62], [138, -62], [184, -38], [230, 0]], // дуга
+        [[0, 0], [46, 0], [92, 0], [138, 0], [184, 0], [230, 0]], // ряд
+        [[0, 25], [46, -25], [92, 25], [138, -25], [184, 25], [230, -25]], // зигзаг
+        [[0, 0], [46, -40], [92, -80], [138, -40], [184, 0], [138, 40], [92, 80], [46, 40]], // ромб
+        [[0, -40], [0, 0], [0, 40], [46, -40], [46, 0], [46, 40], [92, -40], [92, 0], [92, 40]] // кластер
+      ];
+      for (const [dx, dy] of patterns[index % patterns.length]) this.addPickup(x + dx, y + dy, 'coin');
+    }
+    get canisterSpacing() {
+      return parameters.canisterFrequency > 0 ? 100 * FlightRules.pixelsPerMeter / parameters.canisterFrequency : Infinity;
+    }
+    resetCanisters() {
+      for (const obj of this.pickups.getChildren().slice()) if (obj.kind === 'fuel') obj.destroy();
+      this.canisterIndex = 0;
+      this.nextCanisterX = this.model.x + this.canisterSpacing;
+      this.populate(this.model.x + (this.viewWidth || 1200) + 1000);
     }
     populate(untilX) {
+      while (this.nextCanisterX < untilX) {
+        const heights = [325, 240, 390, -220, 300, -500];
+        this.addPickup(this.nextCanisterX, heights[this.canisterIndex++ % heights.length], 'fuel');
+        this.nextCanisterX += this.canisterSpacing;
+      }
+      while (this.model.startX + this.nextMarker * FlightRules.pixelsPerMeter < untilX) {
+        this.addSign(this.model.startX + this.nextMarker * FlightRules.pixelsPerMeter, `${this.nextMarker} м`, this.nextMarker);
+        this.nextMarker += 50;
+      }
       while (this.nextSegment * 620 < untilX) {
         const index = this.nextSegment++;
         const base = 480 + index * 620;
         const centerY = 325 + Math.sin(index * 1.9) * 100;
-        for (let i = 0; i < 6; i++) this.addPickup(base + i * 46, centerY - Math.sin(i / 5 * Math.PI) * 65, 'coin');
-        this.addPickup(base + 370, centerY + 5, 'fuel');
+        this.addCoinPattern(base, centerY, index);
         // Второй маршрут над землёй: рискованный подъём тоже приносит награду.
         if (index > 0) {
-          for (let i = 0; i < 5; i++) this.addPickup(base + i * 49, -160 - (index % 3) * 180 - Math.sin(i) * 40, 'coin');
-          if (index % 2 === 0) this.addPickup(base + 310, -280 - (index % 3) * 180, 'fuel');
+          this.addCoinPattern(base, -160 - (index % 3) * 180, index + 2);
         }
-        if (index > 2 && index % 3 === 0) this.addPickup(base + 160, -1100, 'fuel');
         if (index > 1) {
-          this.addSign(index * 620, `${Math.round((index * 620 - 210) / 10)} м`);
           const tree = this.add.image(base + 280, 528, 'tree').setOrigin(.5, 1).setScale(.4 + (index % 4) * .15).setDepth(2);
           this.decorations.add(tree);
         }
@@ -155,7 +254,7 @@
     collect(obj) {
       if (obj.kind === 'coin') this.model.coins++;
       else this.model.addFuel();
-      const label = this.add.text(obj.x, obj.y - 22, obj.kind === 'coin' ? '+1' : '+30% топлива', {
+      const label = this.add.text(obj.x, obj.y - 22, obj.kind === 'coin' ? '+1' : `+${this.model.parameters.canisterVolume}% топлива`, {
         fontFamily: 'Arial', fontSize: '16px', fontStyle: 'bold', color: obj.kind === 'coin' ? '#ab7c23' : '#407d60',
         stroke: '#fcfcf1', strokeThickness: 4
       }).setOrigin(.5).setDepth(12);
@@ -165,12 +264,11 @@
     }
     land() {
       clearInput(); this.propeller.setVisible(false);
-      ui['flight-tip'].hidden = true; ui.result.hidden = false;
+      ui.result.hidden = false;
       ui['result-distance'].textContent = this.model.distance;
       ui['result-coins'].textContent = this.model.coins;
       ui['result-message'].textContent = this.model.fuel < 1 ? 'Топливо закончилось. Попробуй короткие включения подъёма.' : 'Попробуй другой угол и чередуй подъём с падением.';
       ui.action.innerHTML = 'Новая попытка <span>↗</span>';
-      ui['control-help'].innerHTML = '<strong>Каждый запуск — новый эксперимент</strong><span>Нажми «Новая попытка» или клавишу R.</span>';
     }
     updateHud() {
       const m = this.model;
@@ -184,14 +282,12 @@
       ui['phase-label'].textContent = { ready: 'ГОТОВ К ВЗЛЁТУ', flying: m.lifting ? 'НАБИРАЕМ ВЫСОТУ' : 'СВОБОДНЫЙ ПОЛЁТ', landed: 'ПОЛЁТ ЗАВЕРШЁН' }[m.phase];
       ui['phase-dot'].style.background = m.lifting ? '#d56c42' : '#6f9680';
       ui.action.classList.toggle('held', m.lifting);
-      if (m.phase === 'flying') {
-        ui['flight-tip'].textContent = m.fuel <= 0 ? 'Топливо закончилось · канистра даёт +30%' : m.lifting ? 'Подъём включён · отпусти, чтобы сберечь топливо' : 'Удерживай экран, кнопку или пробел для подъёма';
-      }
     }
     syncView() {
       const m = this.model, camera = this.cameras.main;
-      camera.scrollX = Math.max(0, m.x - 310);
-      camera.scrollY = Math.min(0, m.y - 200);
+      const viewWidth = this.viewWidth || 1200;
+      camera.scrollX = Math.max(0, m.x - Math.min(310, viewWidth * .32));
+      camera.scrollY = Math.min(0, m.y - (this.followY || 200));
       this.hills.forEach((hill, i) => {
         hill.x = i * 1200 - (camera.scrollX * .22 % 1200);
         hill.y = 180 - camera.scrollY * .5;
@@ -199,8 +295,10 @@
       });
       this.ground.tilePositionX = camera.scrollX;
       this.ground.y = 486 - camera.scrollY;
+      this.earth.y = 600 - camera.scrollY;
+      this.earth.height = Math.max(0, this.scale.height / camera.zoom - this.earth.y);
       this.clouds.forEach((cloud, i) => {
-        cloud.x = Phaser.Math.Wrap(cloud.baseX - camera.scrollX * .13 - this.time.now * .002 * (i % 2 + 1), -150, 1500);
+        cloud.x = Phaser.Math.Wrap(cloud.baseX - camera.scrollX * .13 - this.time.now * .002 * (i % 2 + 1), -150, viewWidth + 150);
         cloud.y = Phaser.Math.Wrap(cloud.baseY - camera.scrollY * .13, -70, 530);
       });
       this.plane.setPosition(m.x, m.y);
@@ -241,7 +339,7 @@
           }
           this.accumulator -= step;
         }
-        this.populate(m.x + 1800);
+        this.populate(m.x + Math.max(1800, (this.viewWidth || 1200) + 500));
         this.trailClock += delta;
         if (this.trailClock > 45) {
           this.trailClock = 0; this.trailPoints.push({ x: m.x - 35, y: m.y + 8, lift: m.lifting });
@@ -263,7 +361,7 @@
     type: Phaser.AUTO, parent: 'game', width: 1200, height: 580,
     backgroundColor: '#dcebe6', render: { antialias: true },
     loader: { imageLoadType: 'HTMLImageElement' },
-    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scale: { mode: Phaser.Scale.RESIZE },
     scene: FlightScene
   });
   window.flightGame = game;

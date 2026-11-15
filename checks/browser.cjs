@@ -47,10 +47,35 @@ let ws; let command; const errors = []; const failed = [];
     const mouse = (type, pos) => command('Input.dispatchMouseEvent', { type, ...pos, button: 'left', clickCount: 1 });
     const click = async selector => { const pos=await box(selector); await mouse('mousePressed',pos); await mouse('mouseReleased',pos); };
     const screenshot = async filename => { const shot = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); fs.writeFileSync(path.join(dir,filename), Buffer.from(shot.data,'base64')); };
+    const setSlider = (id,value) => evaluate(`(() => {const input=document.getElementById(${JSON.stringify(id)});input.value=${value};input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
     await command('Page.navigate', { url: `http://127.0.0.1:${port}/` });
     let initial;
     for (let i=0;i<100;i++) { try { initial=await state(); if(initial.phase==='ready') break; } catch {} await sleep(100); }
     assert.equal(initial?.phase,'ready'); assert.equal(initial.error,false); assert.ok(initial.pickups>20);
+    assert.equal(await evaluate("document.getElementById('flight-tip')"),null);
+    assert.equal(await evaluate("document.getElementById('angle').max"),'50');
+    // Проверяем настоящую расстановку: подпись и мировая позиция каждого знака.
+    const checkMarkers = async () => {
+      const markers = await evaluate(`(() => {const s=flightGame.scene.getScene('Flight'); s.populate(5000); return s.decorations.getChildren().filter(o=>o.markerDistance!=null&&typeof o.text==='string').map(o=>({distance:o.markerDistance,text:o.text,meters:(o.x-s.model.startX)/FlightRules.pixelsPerMeter}));})()`);
+      assert.ok(markers.length>=9);
+      markers.forEach((marker,i)=>{assert.equal(marker.distance,(i+1)*50);assert.equal(marker.text,marker.distance+' м');assert.ok(Math.abs(marker.meters-marker.distance)<1e-7);});
+    };
+    await checkMarkers();
+    const shapes = await evaluate(`(() => {const s=flightGame.scene.getScene('Flight');return Array.from({length:5},(_,i)=>{const base=480+i*620;return s.pickups.getChildren().filter(o=>o.kind==='coin'&&o.y>0&&o.x>=base&&o.x<=base+230).map(o=>[o.x-base,Math.round(o.y-(325+Math.sin(i*1.9)*100))]);});})()`);
+    assert.equal(new Set(shapes.map(shape=>JSON.stringify(shape))).size,5);
+    assert.equal(shapes[1].every(point=>point[1]===0),true);
+    assert.equal(shapes[4].length,9);
+    // Ограничение срабатывает и у самого ползунка, и при управлении стрелками.
+    await evaluate("document.getElementById('angle').focus()");
+    await command('Input.dispatchKeyEvent',{type:'keyDown',key:'End',code:'End',windowsVirtualKeyCode:35});
+    await command('Input.dispatchKeyEvent',{type:'keyUp',key:'End',code:'End',windowsVirtualKeyCode:35});
+    assert.equal((await state()).angle,50);
+    await checkMarkers();
+    await evaluate("document.getElementById('angle').blur()");
+    await command('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39});
+    await command('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39});
+    assert.equal((await state()).angle,50);
+    await evaluate("document.getElementById('angle').value=40;flightGame.scene.getScene('Flight').adjustAngle()");
     await screenshot('desktop.png');
     await evaluate("document.getElementById('angle').focus()");
     await command('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39});
@@ -81,6 +106,25 @@ let ws; let command; const errors = []; const failed = [];
     assert.ok((await state()).fuel<99);
     await command('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});
     await click('#reset');
+    // Все надписи топлива занимают одно место на узких экранах, включая пустой бак.
+    for (const [width,height] of [[320,568],[390,844],[844,390],[1440,900]]) {
+      await command('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<900});
+      await sleep(150);
+      const layouts = await evaluate(`(() => {const s=flightGame.scene.getScene('Flight');const states=[{fuel:100,lifting:false},{fuel:50,lifting:true},{fuel:0,lifting:false}];return states.map(status=>{Object.assign(s.model,status);s.updateHud();return ['.dashboard','.arena','#fuel-note'].map(selector=>{const r=document.querySelector(selector).getBoundingClientRect();return [r.x,r.y,r.width,r.height];});});})()`);
+      assert.deepEqual(layouts[0],layouts[1]); assert.deepEqual(layouts[0],layouts[2]);
+      assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'),true);
+      assert.equal(await evaluate('document.documentElement.scrollHeight <= window.innerHeight'),true);
+      const visible = await evaluate(`(() => {const selectors=['#game','.dashboard','.controls','#angle','#canister-frequency','#canister-volume','#lift-power','#reset-parameters','#action'];return selectors.map(selector=>{const r=document.querySelector(selector).getBoundingClientRect();return {selector,x:r.x,y:r.y,right:r.right,bottom:r.bottom};});})()`);
+      for (const element of visible) assert.ok(element.x>=0&&element.y>=0&&element.right<=width+.5&&element.bottom<=height+.5,JSON.stringify(element));
+      assert.equal(visible[0].x,0); assert.equal(visible[0].y,0); assert.equal(visible[0].right,width); assert.equal(visible[0].bottom,height);
+      await evaluate('flightGame.scene.getScene("Flight").resetRun()');
+      await screenshot(`layout-${width}.png`);
+      await evaluate('(() => {const s=flightGame.scene.getScene("Flight");s.model.phase="landed";s.land();})()');
+      const resultBounds=await evaluate('(() => {const result=document.getElementById("result").getBoundingClientRect();return {top:result.top,bottom:result.bottom,hudBottom:document.querySelector(".dashboard").getBoundingClientRect().bottom,controlsTop:document.querySelector(".controls").getBoundingClientRect().top};})()');
+      assert.ok(resultBounds.top>=resultBounds.hudBottom&&resultBounds.bottom<=resultBounds.controlsTop,JSON.stringify({width,height,...resultBounds}));
+      if(width===320) await screenshot('result-mobile.png');
+      await evaluate('flightGame.scene.getScene("Flight").resetRun()');
+    }
     await command('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
     await sleep(200); await screenshot('mobile.png');
     assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'),true);
@@ -90,8 +134,42 @@ let ws; let command; const errors = []; const failed = [];
     assert.equal((await state()).phase,'flying'); assert.ok((await state()).fuel<99);
     await command('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
     await click('#reset');
+    // Частота действительно меняет число предметов; монеты остаются на месте.
+    const coinCount=await evaluate('flightGame.scene.getScene("Flight").pickups.getChildren().filter(o=>o.kind==="coin").length');
+    await setSlider('canister-frequency',0);
+    assert.equal(await evaluate('flightGame.scene.getScene("Flight").pickups.getChildren().filter(o=>o.kind==="fuel").length'),0);
+    assert.equal(await evaluate('flightGame.scene.getScene("Flight").pickups.getChildren().filter(o=>o.kind==="coin").length'),coinCount);
+    await setSlider('canister-frequency',6);
+    const dense=await evaluate('(() => {const s=flightGame.scene.getScene("Flight");return s.pickups.getChildren().filter(o=>o.kind==="fuel"&&o.x<=s.model.x+1000+1e-7).map(o=>o.x-s.model.x);})()');
+    assert.equal(dense.length,6);
+    dense.forEach((x,i)=>assert.ok(Math.abs(x-(i+1)*1000/6)<1e-7));
+    await setSlider('canister-volume',55); await setSlider('lift-power',150); await setSlider('angle',46);
+    await click('#action');
+    await evaluate('(() => {const s=flightGame.scene.getScene("Flight");s.model.fuel=10;s.addPickup(s.model.x,s.model.y,"fuel");})()');
+    await sleep(150);
+    assert.equal((await state()).fuel,65);
+    assert.equal(await evaluate('flightGame.scene.getScene("Flight").model.liftForce'),990);
+    await setSlider('canister-frequency',4.5);
+    assert.equal((await state()).phase,'flying');
+    await command('Page.navigate',{url:`http://127.0.0.1:${port}/`});
+    for(let i=0;i<100;i++){try{if((await state()).phase==='ready')break;}catch{}await sleep(50);}
+    const saved = await evaluate('(() => {const ids=["angle","canister-frequency","canister-volume","lift-power"];return ids.map(id=>Number(document.getElementById(id).value));})()');
+    assert.deepEqual(saved,[46,4.5,55,150]);
+    assert.equal((await state()).angle,46);
+    assert.equal(await evaluate('flightGame.scene.getScene("Flight").model.liftForce'),990);
+    // Cookie остаётся доступен при смене порта после нового запуска сервера.
+    const otherPortCookies=await command('Network.getCookies',{urls:[`http://127.0.0.1:${Number(port)===65535?65534:Number(port)+1}/`]});
+    assert.ok(otherPortCookies.cookies.some(cookie=>cookie.name==='airplane-parameters-v1'&&JSON.parse(decodeURIComponent(cookie.value)).canisterVolume===55));
+    await click('#action'); const beforeDefaults=await state();
+    await click('#reset-parameters');
+    assert.equal((await state()).phase,'flying');
+    assert.ok((await state()).distance>=beforeDefaults.distance);
+    assert.deepEqual(await evaluate('Array.from(document.querySelectorAll(".parameter input")).map(input=>Number(input.value))'),[40,2,30,100]);
+    assert.equal(await evaluate('flightGame.scene.getScene("Flight").model.liftForce'),660);
+    await click('#reset'); assert.equal((await state()).angle,40);
+    await screenshot('mobile.png');
     assert.deepEqual(errors,[]); assert.deepEqual(failed,[]);
-    console.log('PASS: local assets, JS errors, angle, mouse launch/hold/release, scrolling, landing, results, reset, coins, fuel pickup, empty/refilled tank, keyboard, mobile layout, touch');
+    console.log('PASS: flight, collection, angle, markers, coin shapes, fullscreen without scroll, stable HUD, mobile/touch, live parameters, canister density/volume, adjustable lift, saved settings/reload/port scope, parameter reset');
     console.log('Screenshots: .checks/desktop.png, flying.png, result.png, mobile.png');
   } finally {
     try { if(command) await command('Browser.close'); } catch {}
