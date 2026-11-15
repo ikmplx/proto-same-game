@@ -36,13 +36,34 @@
   }
   syncParameters();
   const heldPointers = new Set();
+  const settingsDialog = document.getElementById('settings-dialog');
   let spaceHeld = false;
   let scene;
   const isHeld = () => heldPointers.size > 0 || spaceHeld;
   function clearInput() { heldPointers.clear(); spaceHeld = false; ui.action.classList.remove('held'); }
+  document.getElementById('open-settings').addEventListener('click', () => {
+    clearInput();
+    if (scene) scene.accumulator = 0;
+    document.getElementById('settings-done').textContent = scene?.model.phase === 'flying' ? 'Продолжить' : 'Готово';
+    settingsDialog.showModal();
+  });
+  for (const id of ['close-settings', 'settings-done']) document.getElementById(id).addEventListener('click', () => settingsDialog.close());
+  settingsDialog.addEventListener('close', () => { clearInput(); if (scene) scene.accumulator = 0; });
+  settingsDialog.addEventListener('keydown', event => {
+    if (event.key !== 'Tab') return;
+    const elements = Array.from(settingsDialog.querySelectorAll('button:not(:disabled), input:not(:disabled)'));
+    const first = elements[0], last = elements[elements.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
+  settingsDialog.addEventListener('click', event => {
+    if (event.target !== settingsDialog) return;
+    const bounds = settingsDialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) settingsDialog.close();
+  });
   function beginInput(event) {
     if (event.button !== undefined && event.button !== 0) return;
-    if (!scene || document.hidden) return;
+    if (!scene || document.hidden || settingsDialog.open) return;
     event.preventDefault();
     if (scene.model.phase === 'landed') { scene.resetRun(); return; }
     heldPointers.add(event.pointerId);
@@ -54,7 +75,7 @@
   ui.action.addEventListener('pointerdown', beginInput);
   // Click сохраняет работу кнопки с клавиатуры и вспомогательных устройств.
   ui.action.addEventListener('click', event => {
-    if (event.detail !== 0 || !scene) return;
+    if (event.detail !== 0 || !scene || settingsDialog.open) return;
     if (scene.model.phase === 'ready') scene.launch();
     else if (scene.model.phase === 'landed') scene.resetRun();
   });
@@ -63,6 +84,7 @@
   window.addEventListener('blur', clearInput);
   document.addEventListener('visibilitychange', () => { clearInput(); if (scene) scene.accumulator = 0; });
   window.addEventListener('keydown', event => {
+    if (settingsDialog.open) return;
     const formTarget = /INPUT|BUTTON/.test(event.target.tagName);
     if (event.code === 'Space' && (!formTarget || event.target === ui.action)) {
       event.preventDefault();
@@ -136,15 +158,14 @@
       this.resetRun();
       this.scale.on('resize', this.resizeView, this);
       this.layoutObserver = new ResizeObserver(() => this.resizeView());
-      this.layoutObserver.observe(document.querySelector('.controls'));
       this.layoutObserver.observe(document.querySelector('.dashboard'));
       this.resizeView();
     }
     resizeView() {
-      const controlsHeight = document.querySelector('.controls').getBoundingClientRect().height;
       const hudHeight = document.querySelector('.dashboard').getBoundingClientRect().height;
-      document.querySelector('.arena').style.setProperty('--play-center', `${(hudHeight + this.scale.height - controlsHeight) / 2}px`);
-      this.cameras.main.setOrigin(0, 0).setZoom(Math.max(.25, (this.scale.height - controlsHeight + 12) / 580));
+      const actionTop = ui.action.getBoundingClientRect().top;
+      document.querySelector('.arena').style.setProperty('--play-center', `${(hudHeight + actionTop) / 2}px`);
+      this.cameras.main.setOrigin(0, 0).setZoom(Math.max(.25, this.scale.height / 580));
       this.viewWidth = this.scale.width / this.cameras.main.zoom;
       this.followY = Math.max(200, (hudHeight + 45) / this.cameras.main.zoom);
       while (this.hills.length < Math.ceil(this.viewWidth / 1200) + 1) {
@@ -326,7 +347,7 @@
       });
     }
     update(time, delta) {
-      if (!this.model || document.hidden) return;
+      if (!this.model || document.hidden || settingsDialog.open) return;
       const m = this.model;
       if (m.phase === 'flying') {
         this.accumulator += Math.min(delta / 1000, .1);
